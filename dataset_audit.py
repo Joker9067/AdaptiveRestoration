@@ -87,11 +87,8 @@ class DatasetAuditor:
                 self.stats["critical_errors"] += 1
                 continue
                 
-            # Determine dataset name and split
             dataset_name = parent.name
-            split = "train"
             if dataset_name.lower() in ["train", "val", "test", "validation"]:
-                split = "val" if dataset_name.lower() == "validation" else dataset_name.lower()
                 dataset_name = parent.parent.name
                 
             task_role = self._categorize_task(dataset_name)
@@ -139,7 +136,7 @@ class DatasetAuditor:
                             "channels": 1 if len(clean_img.shape) == 2 else clean_img.shape[2],
                             "format": clean_path.suffix,
                             "category": task_role,
-                            "split": split
+                            "split": "" # To be assigned group-wise
                         }
                         
                         self.records.append(rec)
@@ -204,7 +201,7 @@ class DatasetAuditor:
                                     "channels": 1 if len(clean_arr.shape) == 2 else clean_arr.shape[2],
                                     "format": "HDF5",
                                     "category": task_role,
-                                    "split": np.random.choice(["train", "val", "test"], p=[0.8, 0.1, 0.1])
+                                    "split": "" # To be assigned group-wise
                                 }
                                 
                                 self.records.append(rec)
@@ -216,6 +213,25 @@ class DatasetAuditor:
             except Exception as e:
                 self.stats["critical_messages"].append(f"Failed to open HDF5 {h5_file.name}: {e}")
                 self.stats["critical_errors"] += 1
+
+    def group_aware_split(self):
+        """Assigns train/val/test splits at the clean-image group level deterministically."""
+        rng = np.random.RandomState(42)
+        
+        # Group by clean_hash
+        groups = {}
+        for rec in self.records:
+            chash = rec["clean_hash"]
+            if chash not in groups:
+                groups[chash] = []
+            groups[chash].append(rec)
+            
+        # Assign split
+        sorted_hashes = sorted(groups.keys())
+        for chash in sorted_hashes:
+            split = rng.choice(["train", "val", "test"], p=[0.8, 0.1, 0.1])
+            for rec in groups[chash]:
+                rec["split"] = split
 
     def detect_leakage(self):
         """Cross-checks SHA256 hashes for data leakage across splits."""
@@ -345,6 +361,7 @@ class DatasetAuditor:
                 self.scan_standard_images(base)
                 self.scan_hdf5(base)
                 
+        self.group_aware_split()
         self.detect_leakage()
         df = self.generate_reports()
         self.print_summary(df, stage)
