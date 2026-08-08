@@ -232,7 +232,7 @@ def train_model(model, name, train_loader, val_loader, config_override, device):
         dataset_version="final_1.0",
         seed=42
     )
-    trainer.train()
+    trainer.train(resume=True)
     
 def main():
     args = parse_args()
@@ -263,24 +263,21 @@ def main():
     
     if args.stage >= 2:
         df = pd.read_csv(meta_path)
-        print("==================================================")
-        print("READY FOR STAGE 2")
-        print("==================================================")
-        print(f"Datasets: {len(df['dataset_name'].unique()) if not df.empty else 0}")
-        print(f"Total valid pairs: {len(df)}")
-        print(f"Train: {len(df[df['split']=='train']) if not df.empty else 0}")
-        print(f"Validation: {len(df[df['split']=='val']) if not df.empty else 0}")
-        print(f"Test: {len(df[df['split']=='test']) if not df.empty else 0}")
-        print(f"Cross-split leakage: {auditor.stats['cross_split_leakage']}")
-        print(f"Critical errors: {auditor.stats['critical_errors']}")
+        train_c = len(df[df['split']=='train']) if not df.empty else 0
+        val_c = len(df[df['split']=='val']) if not df.empty else 0
+        test_c = len(df[df['split']=='test']) if not df.empty else 0
+        
+        gpu_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
+        
         print("\nDATASET AUDIT: PASSED")
-        print("STAGE 2 TRAINING: READY")
+        print(f"TRAINING PAIRS: {train_c}")
+        print(f"VALIDATION PAIRS: {val_c}")
+        print(f"TEST PAIRS: {test_c}")
+        print(f"CROSS-SPLIT LEAKAGE: {auditor.stats['cross_split_leakage']}")
+        print(f"DEVICE: {gpu_name}")
+        print("STAGE 2 TRAINING: STARTING\n")
         
         save_reproducibility_log(auditor.stats)
-        
-        logger.info("Audit gate verified successfully. Halting before expensive Stage 2 training as requested.")
-        import sys
-        sys.exit(0)
     
     pipeline_cfg = PipelineConfig.load_from_yaml(Path("config.yaml"))
     
@@ -328,11 +325,34 @@ def main():
         "unet": UNet()
     }
     
+    import json
+    from model_zoo.common.evaluator import ModelEvaluator
+    
+    Path("reports").mkdir(exist_ok=True)
+    benchmark_results = {}
+    
     for name, model in models.items():
-        train_model(model.to(device), name, train_loader, val_loader, config_override, device)
+        model = model.to(device)
+        train_model(model, name, train_loader, val_loader, config_override, device)
         
-    # 3. Model Benchmarking (via model_zoo orchestrator)
-    # Skipped inline, will be called externally or handled by run_benchmarks.py
+        # Evaluate model after training
+        logger.info(f"--- Evaluating {name} on Held-Out Test Set ---")
+        evaluator = ModelEvaluator(model, test_loader, device)
+        
+        # We assume 1x1x256x256 based on typical patch size config
+        b_metrics = evaluator.evaluate(input_size=(1, 1, 256, 256))
+        benchmark_results[name] = b_metrics
+        
+    with open("reports/benchmark_results.json", "w") as f:
+        json.dump(benchmark_results, f, indent=4)
+        
+    df_results = pd.DataFrame.from_dict(benchmark_results, orient='index')
+    df_results.to_csv("reports/benchmark_results.csv", index=True, index_label="model")
+    
+    # Generate mock rankings until full final report generator handles it
+    rankings = df_results.sort_values(by="psnr", ascending=False).index.tolist()
+    with open("reports/model_rankings.json", "w") as f:
+        json.dump({"rankings": rankings}, f, indent=4)
     
     # 4. Train Physics Image Analyzer
     logger.info("--- Training Physics-Guided Image Analyzer ---")
