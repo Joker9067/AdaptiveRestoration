@@ -1,0 +1,126 @@
+# Configuration for Semiconductor Image Restoration Dataset Management System
+
+# Directory pathways
+paths:
+  raw_dir: "./datasets"
+  processed_dir: "./datasets/processed"
+  reports_dir: "./reports"
+  log_file: "./dataset_pipeline.log"
+
+# Dataset processing details
+preprocessing:
+  grayscale: true
+  resize:
+    enabled: true
+    width: 512
+    height: 512
+    mode: "pad"            # Selection: 'pad' (letterbox), 'crop' (center crop), 'stretch'
+    interpolation: "lanczos"  # Selection: 'lanczos', 'area', 'cubic', 'linear'
+  
+  split:
+    train: 0.8
+    val: 0.1
+    test: 0.1
+    seed: 42               # Seed for reproducible train/val/test splits
+
+# Synced data augmentation parameters for the PyTorch Dataset class
+augmentation:
+  enabled: true
+  horizontal_flip: true
+  vertical_flip: true
+  random_rotation: true
+  rotation_degrees: 90
+  random_crop: false       # Can crop further during training if desired
+  crop_size: [256, 256]
+
+# PyTorch DataLoader configurations
+dataloader:
+  batch_size: 8
+  num_workers: 2
+  shuffle_train: true
+  pin_memory: true
+  drop_last: false
+
+# Synthetic SEM data generator characteristics (for verification & mock datasets)
+synthetic:
+  image_size: [1024, 1024]
+  noise_type: "poisson_gaussian" # Selection: 'poisson', 'gaussian', 'poisson_gaussian'
+  poisson_scale: 15.0            # Electron count scaling (lower = noisier)
+  gaussian_sigma: 0.04           # Standard deviation of thermal/sensor electronic noise
+  charging_artifacts: true       # Simulates scanning charging lines
+  beam_blur: true                # Simulates e-beam focus blur
+  blur_sigma: 1.2
+
+# Dataset registries: location mapping and download info (supports Kaggle, HF, Zenodo, Google Drive, Local)
+datasets:
+  sem:
+    name: "SEM"
+    local_path: "./datasets/SEM"
+    source_type: "local"
+    version: "1.0"
+  nist:
+    name: "NIST"
+    local_path: "./datasets/NIST"
+    source_type: "local"
+    version: "v2"
+  sbem_fast:
+    name: "SBEM2-Z50-fast"
+    local_path: "./datasets/SBEM2-Z50-fast"
+    source_type: "local"
+    version: "fast"
+  sbem_slow:
+    name: "SBEM2-Z50-slow"
+    local_path: "./datasets/SBEM2-Z50-slow"
+    source_type: "local"
+    version: "slow"
+  
+  # Demonstration remote entries (used by DownloadManager if local path is empty/missing)
+  remote_zenodo:
+    name: "Zenodo_SEM"
+    local_path: "./datasets/Zenodo_SEM"
+    source_type: "zenodo"
+    record_id: "7880993"
+    file_name: "sem_micrographs.zip"
+    version: "api-v1"
+    sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" # Example hash
+  
+  remote_huggingface:
+    name: "HuggingFace_SEM"
+    local_path: "./datasets/HuggingFace_SEM"
+    source_type: "huggingface"
+    repo_id: "mira-datasets/sem-images"
+    version: "main"
+  
+  remote_gdrive:
+    name: "GoogleDrive_SEM"
+    local_path: "./datasets/GoogleDrive_SEM"
+    source_type: "google_drive"
+    file_id: "1JtH0k5G_xK3j4q2Rpqk"
+    version: "v1.0-drive"
+  
+  remote_kaggle:
+    name: "Kaggle_SEM"
+    local_path: "./datasets/Kaggle_SEM"
+    source_type: "kaggle"
+    dataset_slug: "kla-hackathon/sem-datasets"
+    version: "v3"
+  
+  synthetic_generated:
+    name: "Synthetic_Generated"
+    local_path: "./datasets/Synthetic_Generated"
+    source_type: "local"
+    version: "1.0"
+
+# Synthetic Dataset Generator configuration (Module 5)
+synthetic_generator:
+  enabled: true
+  num_samples: 15
+  clean_source_dir: "./datasets/clean_sources"
+  output_dir: "./datasets/Synthetic_Generated"
+  seed: 42
+  preset: "sem"  # presets: "sem", "electron_microscopy", "general_microscopy", "custom"
+  multiprocessing: true
+  num_workers: 2
+  pipeline: []
+
+

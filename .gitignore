@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Datasets
+datasets/
+datasets_original/
+*.h5
+*.hdf5
+*.tif
+*.tiff
+*.bmp
+*.png
+*.jpg
+*.jpeg
+*.zip
+
+# Model checkpoints
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+
+# Training outputs
+runs/
+logs/
+*.log
+
+# Generated reports/data
+reports/
+unified_metadata.csv
+dataset_pipeline.log
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
