@@ -367,7 +367,11 @@ class DatasetAuditor:
         self.print_summary(df, stage)
         
         if self.stats["critical_errors"] == 0 and not df.empty:
-            out_df = df.rename(columns={"category": "dataset_type"})
+            out_df = df.rename(columns={
+                "category": "dataset_type",
+                "clean_path": "ground_truth_path",
+                "noisy_path": "input_path"
+            })
             out_df["severity"] = "medium"
             out_df["noise_type"] = "mixed"
             out_path = Path("unified_metadata.csv")

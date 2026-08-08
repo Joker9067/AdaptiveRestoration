@@ -262,24 +262,63 @@ def main():
     meta_path = Path("unified_metadata.csv")
     
     if args.stage >= 2:
-        df = pd.read_csv(meta_path)
+        df = pd.read_csv(meta_path, dtype={"input_path": str, "ground_truth_path": str, "split": str})
+        
+        # Validation checks
+        inv_input = df['input_path'].isnull().sum() + (df['input_path'] == "").sum()
+        inv_gt = df['ground_truth_path'].isnull().sum() + (df['ground_truth_path'] == "").sum()
+        inv_split = df['split'].isnull().sum() + (df['split'] == "").sum()
+        
+        if inv_input > 0 or inv_gt > 0 or inv_split > 0:
+            logger.error("Metadata validation failed!")
+            import sys
+            sys.exit(1)
+            
         train_c = len(df[df['split']=='train']) if not df.empty else 0
         val_c = len(df[df['split']=='val']) if not df.empty else 0
         test_c = len(df[df['split']=='test']) if not df.empty else 0
         
+        pipeline_cfg = PipelineConfig.load_from_yaml(Path("config.yaml"))
+        train_loader, val_loader, test_loader = create_dataloaders(meta_path, pipeline_cfg, base_dir=Path("."))
+        
+        if train_loader is None or val_loader is None:
+            logger.error("Dataloaders failed to initialize.")
+            import sys
+            sys.exit(1)
+            
+        try:
+            ds = train_loader.dataset
+            sample_in, sample_gt = ds[0]
+            batch_in, batch_gt = next(iter(train_loader))
+        except Exception as e:
+            logger.error(f"Dataloader test failed: {e}")
+            import sys
+            sys.exit(1)
+            
         gpu_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
         
-        print("\nDATASET AUDIT: PASSED")
-        print(f"TRAINING PAIRS: {train_c}")
-        print(f"VALIDATION PAIRS: {val_c}")
-        print(f"TEST PAIRS: {test_c}")
-        print(f"CROSS-SPLIT LEAKAGE: {auditor.stats['cross_split_leakage']}")
+        print("\nMETADATA VALIDATION: PASSED")
+        print(f"Total records: {len(df)}")
+        print(f"Invalid input paths: {inv_input}")
+        print(f"Invalid target paths: {inv_gt}")
+        print(f"Invalid splits: {inv_split}")
+        print(f"Train: {train_c}")
+        print(f"Val: {val_c}")
+        print(f"Test: {test_c}")
+        print(f"Cross-split leakage: {auditor.stats['cross_split_leakage']}")
+        print("FIRST DATASET SAMPLE: PASSED")
+        print("FIRST DATALOADER BATCH: PASSED")
         print(f"DEVICE: {gpu_name}")
         print("STAGE 2 TRAINING: STARTING\n")
         
         save_reproducibility_log(auditor.stats)
-    
-    pipeline_cfg = PipelineConfig.load_from_yaml(Path("config.yaml"))
+    else:
+        pipeline_cfg = PipelineConfig.load_from_yaml(Path("config.yaml"))
+        train_loader, val_loader, test_loader = create_dataloaders(meta_path, pipeline_cfg, base_dir=Path("."))
+        
+        if train_loader is None or val_loader is None:
+            logger.error("Dataloaders failed to initialize.")
+            return
     
     # Configure epochs based on Stage
     if args.stage == 1:
@@ -294,6 +333,7 @@ def main():
         df_sub = pd.concat([train_df, val_df, test_df])
         df_sub.to_csv(meta_path, index=False)
         logger.info(f"Stage 1 Smoke Test: Reduced dataset to {len(df_sub)} samples.")
+        train_loader, val_loader, test_loader = create_dataloaders(meta_path, pipeline_cfg, base_dir=Path("."))
     elif args.stage == 2:
         epochs = 20
     else:
@@ -306,12 +346,6 @@ def main():
         "gradient_clipping": 1.0,
         "early_stopping_patience": 5 if args.stage > 1 else 0
     }
-    
-    train_loader, val_loader, test_loader = create_dataloaders(meta_path, pipeline_cfg, base_dir=Path("."))
-    
-    if train_loader is None or val_loader is None:
-        logger.error("Dataloaders failed to initialize.")
-        return
 
     # 2. Train Restoration Experts
     models = {
