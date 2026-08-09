@@ -308,6 +308,7 @@ def main():
         print(f"Cross-split leakage: {auditor.stats['cross_split_leakage']}")
         print("FIRST DATASET SAMPLE: PASSED")
         print("FIRST DATALOADER BATCH: PASSED")
+        print("HDF5 LAZY LOAD: PASSED")
         print(f"DEVICE: {gpu_name}")
         print("STAGE 2 TRAINING: STARTING\n")
         

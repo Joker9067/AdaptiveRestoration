@@ -106,37 +106,90 @@ class SemiconductorDataset(Dataset):
         """
         row = self.df.iloc[idx]
         
-        # Paths verification and resolutions
-        # Paths stored are relative to the project workspace root
-        inp_relative = Path(row["input_path"])
-        gt_relative = Path(row["ground_truth_path"])
+    def _load_array(self, path_str: str) -> np.ndarray:
+        """Loads an image from a standard filesystem path or an HDF5 virtual path."""
+        import h5py
         
-        inp_full = self.base_dir / inp_relative
-        gt_full = self.base_dir / gt_relative
+        if "::" in path_str:
+            file_path, internal_key = path_str.split("::", 1)
+            fpath = Path(file_path)
+            if not fpath.is_absolute():
+                fpath = self.base_dir / fpath
+                
+            if not fpath.exists():
+                raise FileNotFoundError(f"HDF5 file does not exist: {fpath}")
+                
+            try:
+                with h5py.File(fpath, 'r') as f:
+                    # Handle keys robustly
+                    key_to_try = internal_key
+                    if key_to_try not in f:
+                        alt_key = f"/{internal_key.lstrip('/')}"
+                        if alt_key in f:
+                            key_to_try = alt_key
+                        else:
+                            raise KeyError(f"Internal key '{internal_key}' not found in {fpath}")
+                            
+                    dataset = f[key_to_try]
+                    if not isinstance(dataset, h5py.Dataset):
+                        raise ValueError(f"Object at '{internal_key}' is not an HDF5 dataset in {fpath}")
+                        
+                    img = dataset[()]
+            except Exception as e:
+                raise RuntimeError(f"Failed to read HDF5 {fpath}::'{internal_key}': {e}")
+        else:
+            fpath = Path(path_str)
+            if not fpath.is_absolute():
+                fpath = self.base_dir / fpath
+                
+            if not fpath.exists():
+                raise FileNotFoundError(f"Image file does not exist: {fpath}")
+                
+            img = cv2.imread(str(fpath), cv2.IMREAD_ANYDEPTH)
+            if img is None:
+                raise ValueError(f"Failed to load standard image: {fpath}")
 
-        # Load grayscaled files
-        assert inp_full.exists(), f"Processed input file does not exist: {inp_full}"
-        assert gt_full.exists(), f"Processed ground truth file does not exist: {gt_full}"
+        # Standardize to 2D (H, W)
+        if len(img.shape) == 3:
+            if img.shape[0] in [1, 3]:
+                img = np.transpose(img, (1, 2, 0))
+            if img.shape[-1] == 1:
+                img = np.squeeze(img, axis=-1)
+            elif img.shape[-1] == 3:
+                # Convert RGB to Grayscale
+                if img.dtype == np.uint16:
+                    # cvtColor struggles with uint16 sometimes, handle manually if needed, but typically IMREAD_ANYDEPTH works
+                    img = (img[..., 0] * 0.299 + img[..., 1] * 0.587 + img[..., 2] * 0.114).astype(np.uint16)
+                else:
+                    img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+        elif len(img.shape) != 2:
+            raise ValueError(f"Unsupported array shape {img.shape} from {path_str}")
 
-        def _load_image(path_str: str):
-            if ".h5::" in path_str or ".hdf5::" in path_str:
-                import h5py
-                file_path, group_path = path_str.split("::")
-                with h5py.File(file_path, 'r') as f:
-                    img = f[group_path][()]
-            else:
-                img = cv2.imread(path_str, cv2.IMREAD_ANYDEPTH)
-            
-            # Force resize to 128x128 for tractable local CPU testing/training of Transformers
-            if img is not None:
-                img = cv2.resize(img, (128, 128), interpolation=cv2.INTER_AREA)
-            return img
+        # Support existing 128x128 resize logic for transformers
+        img = cv2.resize(img, (128, 128), interpolation=cv2.INTER_AREA)
+        return img
 
-        inp_img = _load_image(str(inp_full))
-        gt_img = _load_image(str(gt_full))
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Loads and processes the item matching the index.
 
-        if inp_img is None or gt_img is None:
-            raise ValueError(f"Failed to load image files at index {idx}: {inp_full} / {gt_full}")
+        Args:
+            idx (int): The index.
+
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor]:
+                - Input tensor of shape (1, H, W) normalized to [0.0, 1.0].
+                - Ground truth tensor of shape (1, H, W) normalized to [0.0, 1.0].
+        """
+        row = self.df.iloc[idx]
+        
+        inp_str = str(row["input_path"])
+        gt_str = str(row["ground_truth_path"])
+
+        try:
+            inp_img = self._load_array(inp_str)
+            gt_img = self._load_array(gt_str)
+        except Exception as e:
+            raise ValueError(f"Failed to load image files at index {idx}: {e}")
 
         # Apply Synced Augmentation
         inp_img, gt_img = self._sync_augment(inp_img, gt_img)
