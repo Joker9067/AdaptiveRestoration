@@ -106,7 +106,7 @@ class SemiconductorDataset(Dataset):
         """
         row = self.df.iloc[idx]
         
-    def _load_array(self, path_str: str) -> np.ndarray:
+    def _load_array(self, path_str: str, frame_index: int = -1) -> np.ndarray:
         """Loads an image from a standard filesystem path or an HDF5 virtual path."""
         import h5py
         
@@ -134,7 +134,10 @@ class SemiconductorDataset(Dataset):
                     if not isinstance(dataset, h5py.Dataset):
                         raise ValueError(f"Object at '{internal_key}' is not an HDF5 dataset in {fpath}")
                         
-                    img = dataset[()]
+                    if frame_index != -1 and len(dataset.shape) == 3 and dataset.shape[-1] not in [1, 3]:
+                        img = dataset[frame_index]
+                    else:
+                        img = dataset[()]
             except Exception as e:
                 raise RuntimeError(f"Failed to read HDF5 {fpath}::'{internal_key}': {e}")
         else:
@@ -184,10 +187,11 @@ class SemiconductorDataset(Dataset):
         
         inp_str = str(row["input_path"])
         gt_str = str(row["ground_truth_path"])
+        frame_idx = int(row.get("frame_index", -1))
 
         try:
-            inp_img = self._load_array(inp_str)
-            gt_img = self._load_array(gt_str)
+            inp_img = self._load_array(inp_str, frame_idx)
+            gt_img = self._load_array(gt_str, frame_idx)
         except Exception as e:
             raise ValueError(f"Failed to load image files at index {idx}: {e}")
 

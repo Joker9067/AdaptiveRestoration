@@ -19,6 +19,7 @@ def test():
     print(f"Invalid splits: {inv_split}")
     
     pipeline_cfg = PipelineConfig.load_from_yaml(Path("config.yaml"))
+    pipeline_cfg.dataloader.num_workers = 2
     train_loader, val_loader, test_loader = create_dataloaders(meta_path, pipeline_cfg, base_dir=Path("."))
     
     ds = train_loader.dataset

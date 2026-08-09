@@ -131,6 +131,9 @@ class DatasetAuditor:
                             "noisy_path": str(noisy_path),
                             "clean_hash": clean_hash,
                             "noisy_hash": noisy_hash,
+                            "group_hash": clean_hash,
+                            "parent_image_id": name,
+                            "frame_index": -1,
                             "resolution": f"{w}x{h}",
                             "bit_depth": clean_img.dtype.name,
                             "channels": 1 if len(clean_img.shape) == 2 else clean_img.shape[2],
@@ -183,30 +186,52 @@ class DatasetAuditor:
                                 clean_arr = f[clean_g][k][()]
                                 noisy_arr = f[noisy_g][k][()]
                                 
-                                clean_hash = self._hash_array(clean_arr)
-                                noisy_hash = self._hash_array(noisy_arr)
+                                parent_clean_hash = self._hash_array(clean_arr)
                                 
-                                h, w = clean_arr.shape[:2]
+                                is_volume = len(clean_arr.shape) == 3 and clean_arr.shape[-1] not in [1, 3]
                                 
-                                rec = {
-                                    "dataset_name": dataset_name,
-                                    "source_path": str(h5_file),
-                                    "image_id": k,
-                                    "clean_path": f"{h5_file}::{clean_g}/{k}",
-                                    "noisy_path": f"{h5_file}::{noisy_g}/{k}",
-                                    "clean_hash": clean_hash,
-                                    "noisy_hash": noisy_hash,
-                                    "resolution": f"{w}x{h}",
-                                    "bit_depth": clean_arr.dtype.name,
-                                    "channels": 1 if len(clean_arr.shape) == 2 else clean_arr.shape[2],
-                                    "format": "HDF5",
-                                    "category": task_role,
-                                    "split": "" # To be assigned group-wise
-                                }
-                                
-                                self.records.append(rec)
-                                self.stats["valid_image_samples"] += 2
-                                self.stats["valid_supervised_pairs"] += 1
+                                if is_volume:
+                                    num_frames = clean_arr.shape[0]
+                                    h, w = clean_arr.shape[1:3]
+                                else:
+                                    num_frames = 1
+                                    h, w = clean_arr.shape[:2]
+                                    
+                                for frame_index in range(num_frames):
+                                    if is_volume:
+                                        c_frame = clean_arr[frame_index]
+                                        n_frame = noisy_arr[frame_index]
+                                        img_id = f"{k}_f{frame_index}"
+                                    else:
+                                        c_frame = clean_arr
+                                        n_frame = noisy_arr
+                                        img_id = k
+                                        
+                                    clean_hash = self._hash_array(c_frame)
+                                    noisy_hash = self._hash_array(n_frame)
+                                    
+                                    rec = {
+                                        "dataset_name": dataset_name,
+                                        "source_path": str(h5_file),
+                                        "image_id": img_id,
+                                        "parent_image_id": k,
+                                        "clean_path": f"{h5_file}::{clean_g}/{k}",
+                                        "noisy_path": f"{h5_file}::{noisy_g}/{k}",
+                                        "clean_hash": clean_hash,
+                                        "noisy_hash": noisy_hash,
+                                        "group_hash": parent_clean_hash,
+                                        "frame_index": frame_index if is_volume else -1,
+                                        "resolution": f"{w}x{h}",
+                                        "bit_depth": c_frame.dtype.name,
+                                        "channels": 1 if len(c_frame.shape) == 2 else c_frame.shape[2],
+                                        "format": "HDF5",
+                                        "category": task_role,
+                                        "split": "" # To be assigned group-wise
+                                    }
+                                    
+                                    self.records.append(rec)
+                                    self.stats["valid_image_samples"] += 2
+                                    self.stats["valid_supervised_pairs"] += 1
                                 
                             except Exception as e:
                                 self.stats["rejected_samples"] += 1
@@ -218,13 +243,13 @@ class DatasetAuditor:
         """Assigns train/val/test splits at the clean-image group level deterministically."""
         rng = np.random.RandomState(42)
         
-        # Group by clean_hash
+        # Group by group_hash
         groups = {}
         for rec in self.records:
-            chash = rec["clean_hash"]
-            if chash not in groups:
-                groups[chash] = []
-            groups[chash].append(rec)
+            ghash = rec["group_hash"]
+            if ghash not in groups:
+                groups[ghash] = []
+            groups[ghash].append(rec)
             
         # Assign split
         sorted_hashes = sorted(groups.keys())
